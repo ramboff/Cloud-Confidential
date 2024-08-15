@@ -1,11 +1,14 @@
 # List all Retention Polices and Auto-Apply policies for Labels.
 
 # Define the path to the output CSV file
-$OutputFilePath = "C:\F6.csv"
-#We are fetching only Retention Polices and Auto-Apply policies for Labels. 
+$OutputFilePath = "C:\RetentionPolicies.csv"
+
+# Fetch only Retention Policies and Auto-Apply policies for Labels
 $Policies = Get-RetentionCompliancePolicy -DistributionDetail -RetentionRuleTypes | ? { $_.RetentionRuleTypes -ne "Publish"}
+
 # Create a dictionary to cache ComplianceTag lookups
 $ComplianceTagCache = @{}
+
 # Function to resolve ComplianceTag GUIDs to names
 Function Resolve-ComplianceTag {
     param (
@@ -22,13 +25,13 @@ Function Resolve-ComplianceTag {
     return $ComplianceTagCache[$Guid]
 }
 
-# CSVString for entries
+# Initialize CSVString for entries
 $CSVString = @()
 
 ForEach ($P in $Policies) {
     $PublishedLabels = ""
     $RuleSettings = "Simple"  # Default setting
-    $Duration = $Null      # Initialize Duration
+    $Duration = $Null          # Initialize Duration
     $RetentionAction = "Retain"  # Default Retention Action
 
     # Get the associated rules for the policy
@@ -42,6 +45,7 @@ ForEach ($P in $Policies) {
     }
 
     $PublishedLabels = $PublishedLabelsArray -join ", "
+
     ForEach ($Rule in $Rules) {
         If (-not [string]::IsNullOrEmpty($Rule.ContentMatchQuery) -and -not [string]::IsNullOrWhiteSpace($Rule.ContentMatchQuery)) {
             $RuleSettings = "Advanced/KQL"
@@ -55,28 +59,78 @@ ForEach ($P in $Policies) {
             $RetentionAction = $Rule.RetentionComplianceAction
         }
     }
-    $SharePointURLs = if ($P.SharePointLocation -contains "All") { "All SharePoint Sites" } else { $P.SharePointLocation | ForEach-Object { $_.Url } }
-    $SharePointExceptionURLs = if ($P.SharePointLocationException -contains "All") { "All SharePoint Sites (Exception)" } else { $P.SharePointLocationException | ForEach-Object { $_.Url } }
 
-    # Add the result to the CSV Strnig 
-    $ CSVString += [PSCustomObject]@{
+    # Process SharePoint locations and output URLs instead of names
+    $SiteName = $Null
+    $SiteURL = $Null
+    $ExceptionName = $Null
+    $ExceptionURL = $Null
+
+    If ($P.SharePointLocation -ne $Null) {
+        If ($P.SharePointLocation.Name -eq "All") {
+            $SiteName = "All SharePoint Sites"
+            $SiteURL = "All SharePoint Sites"
+        } Else {
+            $Locations = ($P | Select-Object -ExpandProperty SharePointLocation)
+            ForEach ($L in $Locations) {
+                $SiteName += $L.DisplayName + ", "
+                $SiteURL += $L.Name + ", "
+            }
+            $SiteName = $SiteName.TrimEnd(", ")
+            $SiteURL = $SiteURL.TrimEnd(", ")
+        }
+    }
+
+    If ($P.SharePointLocationException -ne $Null) {
+        $Locations = ($P | Select-Object -ExpandProperty SharePointLocationException)
+        ForEach ($L in $Locations) {
+            $ExceptionName += $L.DisplayName + ", "
+            $ExceptionURL += $L.Name + ", "
+        }
+        $ExceptionName = $ExceptionName.TrimEnd(", ")
+        $ExceptionURL = $ExceptionURL.TrimEnd(", ")
+    }
+
+    # Process Modern Group locations to extract only the group name
+    $ModernGroupURLs = @()
+    $ModernGroupExceptionURLs = @()
+
+    If ($P.ModernGroupLocation -ne $Null) {
+        If ($P.ModernGroupLocation -eq "All") {
+            $ModernGroupURLs += "All Modern Groups"
+        } Else {
+            $ModernGroupURLs += ($P.ModernGroupLocation | ForEach-Object { $_.Name.Split('@')[0] }) -join ", "
+        }
+    }
+
+    If ($P.ModernGroupLocationException -ne $Null) {
+        If ($P.ModernGroupLocationException -eq "All") {
+            $ModernGroupExceptionURLs += "All Modern Groups (Exception)"
+        } Else {
+            $ModernGroupExceptionURLs += ($P.ModernGroupLocationException | ForEach-Object { $_.Name.Split('@')[0] }) -join ", "
+        }
+    }
+
+    # Add the result to the CSV String
+    $CSVString += [PSCustomObject]@{
         PolicyName                     = $P.Name
-        Type                           = $P.Type
+        Priority                       = $P.Priority
+        WhenCreated                    = $P.WhenCreated
         PublishedLabels                = $PublishedLabels
-        Rules	                       = $RuleSettings
+        Rules                          = $RuleSettings
         RetentionAction                = $RetentionAction
         Duration                       = $Duration
         RetainCloudAttachment          = $P.RetainCloudAttachment
-        SharePointLocation             = $SharePointURLs -join ", "
-        SharePointLocationException    = $SharePointExceptionURLs -join ", "
+        SharePointLocation             = $SiteURL
+        SharePointLocationException    = $ExceptionURL
+        ModernGroupLocation            = $ModernGroupURLs -join ", "
+        ModernGroupLocationException   = $ModernGroupExceptionURLs -join ", "
         RetentionRuleTypes             = $P.RetentionRuleTypes -join ", "
         ExchangeLocation               = $P.ExchangeLocation -join ", "
         ExchangeLocationException      = $P.ExchangeLocationException -join ", "
         PublicFolderLocation           = $P.PublicFolderLocation -join ", "
         SkypeLocation                  = $P.SkypeLocation -join ", "
         SkypeLocationException         = $P.SkypeLocationException -join ", "
-        ModernGroupLocation            = $P.ModernGroupLocation -join ", "
-        ModernGroupLocationException   = $P.ModernGroupException -join ", "
         OneDriveLocation               = $P.OneDriveLocation -join ", "
         OneDriveLocationException      = $P.OneDriveLocationException -join ", "
         TeamsChatLocation              = $P.TeamsChatLocation -join ", "
@@ -94,7 +148,7 @@ ForEach ($P in $Policies) {
 
 # Output the results to CSV
 if ($CSVString.Count -gt 0) {
-    $ CSVString | Export-Csv -Path $OutputFilePath -NoTypeInformation -Force
+    $CSVString | Export-Csv -Path $OutputFilePath -NoTypeInformation -Force
     Write-Host "Retention policies report has been saved to $OutputFilePath"
 } else {
     Write-Host "No data to export. The CSVString is empty."
