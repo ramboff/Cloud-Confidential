@@ -1,0 +1,14 @@
+$PolicyName = "M365 Groups"
+# Retrieve the policy by name
+$Policy = Get-RetentionCompliancePolicy -Identity $PolicyName -DistributionDetail
+
+# Output all properties of the policy
+$Policy | Format-List -Property *
+
+# Retrieve all associated rules for this policy
+$Rules = Get-RetentionComplianceRule -Policy $PolicyName
+
+# Output all properties of the rules associated with the policy
+ForEach ($Rule in $Rules) {
+   $Rule | Format-List -Property *
+}
