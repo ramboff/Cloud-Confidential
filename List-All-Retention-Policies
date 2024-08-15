@@ -1,0 +1,101 @@
+# List all Retention Polices and Auto-Apply policies for Labels.
+
+# Define the path to the output CSV file
+$OutputFilePath = "C:\F6.csv"
+#We are fetching only Retention Polices and Auto-Apply policies for Labels. 
+$Policies = Get-RetentionCompliancePolicy -DistributionDetail -RetentionRuleTypes | ? { $_.RetentionRuleTypes -ne "Publish"}
+# Create a dictionary to cache ComplianceTag lookups
+$ComplianceTagCache = @{}
+# Function to resolve ComplianceTag GUIDs to names
+Function Resolve-ComplianceTag {
+    param (
+        [string]$Guid
+    )
+    if (-not $ComplianceTagCache.ContainsKey($Guid)) {
+        $Tag = Get-ComplianceTag -Identity $Guid -ErrorAction SilentlyContinue
+        if ($Tag -ne $Null) {
+            $ComplianceTagCache[$Guid] = $Tag.Name
+        } else {
+            $ComplianceTagCache[$Guid] = $Guid  # fallback to GUID if not found
+        }
+    }
+    return $ComplianceTagCache[$Guid]
+}
+
+# CSVString for entries
+$CSVString = @()
+
+ForEach ($P in $Policies) {
+    $PublishedLabels = ""
+    $RuleSettings = "Simple"  # Default setting
+    $Duration = $Null      # Initialize Duration
+    $RetentionAction = "Retain"  # Default Retention Action
+
+    # Get the associated rules for the policy
+    $Rules = Get-RetentionComplianceRule -Policy $P.Name
+
+    # Collect all retention labels published by this policy
+    $PublishedLabelsArray = $Rules | ForEach-Object {
+        if ($_.ApplyComplianceTag -ne $Null) {
+            Resolve-ComplianceTag $_.ApplyComplianceTag
+        }
+    }
+
+    $PublishedLabels = $PublishedLabelsArray -join ", "
+    ForEach ($Rule in $Rules) {
+        If (-not [string]::IsNullOrEmpty($Rule.ContentMatchQuery) -and -not [string]::IsNullOrWhiteSpace($Rule.ContentMatchQuery)) {
+            $RuleSettings = "Advanced/KQL"
+        }
+        ElseIf (-not [string]::IsNullOrEmpty($Rule.ContentContainsSensitiveInformation) -and -not [string]::IsNullOrWhiteSpace($Rule.ContentContainsSensitiveInformation)) {
+            $RuleSettings = "Advanced/Sensitive Data"
+        }
+        $Duration = $Rule.RetentionDuration
+
+        If (-not [string]::IsNullOrEmpty($Rule.RetentionComplianceAction)) {
+            $RetentionAction = $Rule.RetentionComplianceAction
+        }
+    }
+    $SharePointURLs = if ($P.SharePointLocation -contains "All") { "All SharePoint Sites" } else { $P.SharePointLocation | ForEach-Object { $_.Url } }
+    $SharePointExceptionURLs = if ($P.SharePointLocationException -contains "All") { "All SharePoint Sites (Exception)" } else { $P.SharePointLocationException | ForEach-Object { $_.Url } }
+
+    # Add the result to the CSV Strnig 
+    $ CSVString += [PSCustomObject]@{
+        PolicyName                     = $P.Name
+        Type                           = $P.Type
+        PublishedLabels                = $PublishedLabels
+        Rules	                       = $RuleSettings
+        RetentionAction                = $RetentionAction
+        Duration                       = $Duration
+        RetainCloudAttachment          = $P.RetainCloudAttachment
+        SharePointLocation             = $SharePointURLs -join ", "
+        SharePointLocationException    = $SharePointExceptionURLs -join ", "
+        RetentionRuleTypes             = $P.RetentionRuleTypes -join ", "
+        ExchangeLocation               = $P.ExchangeLocation -join ", "
+        ExchangeLocationException      = $P.ExchangeLocationException -join ", "
+        PublicFolderLocation           = $P.PublicFolderLocation -join ", "
+        SkypeLocation                  = $P.SkypeLocation -join ", "
+        SkypeLocationException         = $P.SkypeLocationException -join ", "
+        ModernGroupLocation            = $P.ModernGroupLocation -join ", "
+        ModernGroupLocationException   = $P.ModernGroupException -join ", "
+        OneDriveLocation               = $P.OneDriveLocation -join ", "
+        OneDriveLocationException      = $P.OneDriveLocationException -join ", "
+        TeamsChatLocation              = $P.TeamsChatLocation -join ", "
+        TeamsChatLocationException     = $P.TeamsChatLocationException -join ", "
+        TeamsChannelLocation           = $P.TeamsChannelLocation -join ", "
+        TeamsChannelLocationException  = $P.TeamsChannelException -join ", "
+        AdaptiveScopeLocation          = $P.AdaptiveScopeLocation -join ", "
+        RestrictiveRetention           = $P.RestrictiveRetention
+        IsSimulation                   = $P.IsSimulation
+        IsAdaptivePolicy               = $P.IsAdaptivePolicy
+        Applications                   = $P.Applications -join ", "
+        TeamsPolicy                    = $P.TeamsPolicy
+    }
+}
+
+# Output the results to CSV
+if ($CSVString.Count -gt 0) {
+    $ CSVString | Export-Csv -Path $OutputFilePath -NoTypeInformation -Force
+    Write-Host "Retention policies report has been saved to $OutputFilePath"
+} else {
+    Write-Host "No data to export. The CSVString is empty."
+}
