@@ -1,3 +1,5 @@
+# Llists available properties of the Retention Policy
+
 $PolicyName = "M365 Groups"
 # Retrieve the policy by name
 $Policy = Get-RetentionCompliancePolicy -Identity $PolicyName -DistributionDetail
