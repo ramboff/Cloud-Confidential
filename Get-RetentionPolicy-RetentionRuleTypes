@@ -1,0 +1,12 @@
+# Retrieve all retention policies from the tenant with RetentionRuleTypes
+$Policies = Get-RetentionCompliancePolicy -DistributionDetail -RetentionRuleTypes
+
+# Process each policy and create a custom object
+$PolicyOutput = $Policies | ForEach-Object {[PSCustomObject]@{
+    Name = $_.Name
+    RetentionRuleTypes = $_.RetentionRuleTypes -join ", "
+   }
+}
+
+# Output the results in a table and order by RetentionRuleTypes
+$PolicyOutput | Sort-Object RetentionRuleTypes | Format-Table Name, RetentionRuleTypes -AutoSize
